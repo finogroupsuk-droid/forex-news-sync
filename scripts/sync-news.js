@@ -18,6 +18,7 @@ const FEED_URL = "https://www.forexlive.com/feed/news";
 const SOURCE_NAME = "ForexLive";
 const ITEM_LIMIT = 10;
 const RETENTION_DAYS = 7;
+const SUMMARY_MAX_LENGTH = 1200;
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
@@ -68,8 +69,8 @@ function cleanText(html) {
 
 function buildSummary(item) {
   const fullText = cleanText(item.contentEncoded || item.content || item.description || item.contentSnippet || "");
-  if (fullText.length > 600) {
-    return fullText.slice(0, 600) + "...";
+  if (fullText.length > SUMMARY_MAX_LENGTH) {
+    return fullText.slice(0, SUMMARY_MAX_LENGTH) + "...";
   }
   return fullText;
 }
