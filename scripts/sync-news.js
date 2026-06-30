@@ -18,7 +18,8 @@ const FEED_URL = "https://www.forexlive.com/feed/news";
 const SOURCE_NAME = "ForexLive";
 const ITEM_LIMIT = 10;
 const RETENTION_DAYS = 7;
-const SUMMARY_MAX_LENGTH = 1200;
+const SUMMARY_MAX_LENGTH = 5000;
+const SHORT_TEXT_THRESHOLD = 150;
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
@@ -53,26 +54,61 @@ async function fetchOgImage(url) {
   }
 }
 
-function cleanText(html) {
-  if (!html) return "";
-  let text = html
-    .replace(/<img[^>]*>/g, "")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&nbsp;/g, " ")
+async function fetchFullArticleText(url) {
+  try {
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) return "";
+    const html = await res.text();
+
+    let articleHtml = "";
+    const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+    if (articleMatch) {
+      articleHtml = articleMatch[1];
+    } else {
+      const descMatch = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)
+        || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i);
+      return descMatch ? decodeHtmlEntities(descMatch[1]).trim() : "";
+    }
+
+    return cleanText(articleHtml);
+  } catch (err) {
+    console.warn(`خطا در خواندن متن کامل از ${url}: ${err.message}`);
+    return "";
+  }
+}
+
+function decodeHtmlEntities(str) {
+  return str
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ");
+}
+
+function cleanText(html) {
+  if (!html) return "";
+  let text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<img[^>]*>/g, "")
+    .replace(/<[^>]*>/g, " ");
+  text = decodeHtmlEntities(text);
+  text = text.replace(/\s+/g, " ").trim();
   return text;
 }
 
-function buildSummary(item) {
+function buildFeedSummary(item) {
   const fullText = cleanText(item.contentEncoded || item.content || item.description || item.contentSnippet || "");
-  if (fullText.length > SUMMARY_MAX_LENGTH) {
-    return fullText.slice(0, SUMMARY_MAX_LENGTH) + "...";
-  }
   return fullText;
+}
+
+function trimSummary(text) {
+  if (text.length > SUMMARY_MAX_LENGTH) {
+    return text.slice(0, SUMMARY_MAX_LENGTH) + "...";
+  }
+  return text;
 }
 
 async function getExistingArticles() {
@@ -134,9 +170,18 @@ async function main() {
       image = await fetchOgImage(link);
     }
 
+    let summary = buildFeedSummary(item);
+
+    if (summary.length < SHORT_TEXT_THRESHOLD) {
+      const fullText = await fetchFullArticleText(link);
+      if (fullText && fullText.length > summary.length) {
+        summary = fullText;
+      }
+    }
+
     newArticles.push({
       title: item.title || "بدون عنوان",
-      summary: buildSummary(item),
+      summary: trimSummary(summary),
       image_url: image,
       source_url: link,
       source_name: SOURCE_NAME,
