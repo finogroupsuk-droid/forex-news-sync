@@ -4,7 +4,8 @@ const parser = new Parser({
     item: [
       ['media:content', 'mediaContent'],
       ['media:thumbnail', 'mediaThumbnail'],
-      ['enclosure', 'enclosure']
+      ['enclosure', 'enclosure'],
+      ['content:encoded', 'contentEncoded']
     ]
   }
 });
@@ -13,12 +14,9 @@ const APP_ID = process.env.BASE44_APP_ID;
 const API_KEY = process.env.BASE44_API_KEY;
 const BASE_URL = `https://app.base44.com/api/apps/${APP_ID}/entities/NewsArticle`;
 
-const FEEDS = [
-  { url: "https://www.investing.com/rss/news_1.rss", name: "Investing.com" },
-  { url: "https://www.fxstreet.com/rss", name: "FXStreet" },
-  { url: "https://www.dailyforex.com/rss/forexnews.xml", name: "DailyForex" },
-  { url: "https://www.forexlive.com/feed", name: "ForexLive" }
-];
+const FEED_URL = "https://www.investing.com/rss/news_1.rss";
+const SOURCE_NAME = "Investing.com";
+const ITEM_LIMIT = 10;
 
 function extractImage(item) {
   if (item.mediaContent && item.mediaContent['$'] && item.mediaContent['$'].url) {
@@ -30,45 +28,47 @@ function extractImage(item) {
   if (item.enclosure && item.enclosure.url) {
     return item.enclosure.url;
   }
-  const content = item.content || item.contentSnippet || item['content:encoded'] || "";
+  const content = item.contentEncoded || item.content || "";
   const match = content.match(/<img[^>]+src="([^">]+)"/);
   if (match) return match[1];
   return "";
 }
 
-function cleanSummary(text) {
-  if (!text) return "";
-  const stripped = text.replace(/<[^>]*>/g, "").trim();
-  return stripped.length > 300 ? stripped.slice(0, 300) + "..." : stripped;
+function cleanText(html) {
+  if (!html) return "";
+  let text = html
+    .replace(/<img[^>]*>/g, "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text;
 }
 
-async function fetchFeed(feed) {
-  try {
-    const parsed = await parser.parseURL(feed.url);
-    return parsed.items.slice(0, 10).map(item => ({
-      title: item.title || "بدون عنوان",
-      summary: cleanSummary(item.contentSnippet || item.summary || item.description || ""),
-      image_url: extractImage(item),
-      source_url: item.link || "",
-      source_name: feed.name,
-      published_date: item.isoDate || item.pubDate || new Date().toISOString()
-    }));
-  } catch (err) {
-    console.warn(`خطا در خواندن فید ${feed.name}: ${err.message}`);
-    return [];
+function buildSummary(item) {
+  const fullText = cleanText(item.contentEncoded || item.content || item.description || item.contentSnippet || "");
+  if (fullText.length > 600) {
+    return fullText.slice(0, 600) + "...";
   }
+  return fullText;
 }
 
 async function main() {
-  let allArticles = [];
-  for (const feed of FEEDS) {
-    const items = await fetchFeed(feed);
-    console.log(`${feed.name}: ${items.length} خبر دریافت شد`);
-    allArticles = allArticles.concat(items);
-  }
+  const parsed = await parser.parseURL(FEED_URL);
+  const items = parsed.items.slice(0, ITEM_LIMIT);
 
-  allArticles = allArticles.filter(a => a.source_url);
-  console.log(`مجموع اخبار معتبر: ${allArticles.length}`);
+  const articles = items.map(item => ({
+    title: item.title || "بدون عنوان",
+    summary: buildSummary(item),
+    image_url: extractImage(item),
+    source_url: item.link || "",
+    source_name: SOURCE_NAME,
+    published_date: item.isoDate || item.pubDate || new Date().toISOString()
+  })).filter(a => a.source_url);
+
+  console.log(`تعداد اخبار دریافت‌شده: ${articles.length}`);
+  articles.forEach(a => {
+    console.log(`- ${a.title} | عکس: ${a.image_url ? "دارد" : "ندارد"} | طول متن: ${a.summary.length}`);
+  });
 
   const deleteRes = await fetch(BASE_URL, {
     method: "DELETE",
@@ -91,7 +91,7 @@ async function main() {
       "Content-Type": "application/json",
       "api_key": API_KEY
     },
-    body: JSON.stringify(allArticles)
+    body: JSON.stringify(articles)
   });
 
   if (!bulkRes.ok) {
@@ -99,7 +99,7 @@ async function main() {
     throw new Error(`خطا در ارسال اخبار به Base44: ${bulkRes.status} - ${errText}`);
   }
 
-  console.log(`با موفقیت ${allArticles.length} خبر ذخیره شد.`);
+  console.log(`با موفقیت ${articles.length} خبر ذخیره شد.`);
 }
 
 main().catch(err => {
