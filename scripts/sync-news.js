@@ -34,6 +34,24 @@ function extractImage(item) {
   return "";
 }
 
+const HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+};
+
+async function fetchOgImage(url) {
+  try {
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) return "";
+    const html = await res.text();
+    const imageMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+      || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+    return imageMatch ? imageMatch[1].trim() : "";
+  } catch (err) {
+    console.warn(`خطا در دریافت عکس از ${url}: ${err.message}`);
+    return "";
+  }
+}
+
 function cleanText(html) {
   if (!html) return "";
   let text = html
@@ -60,14 +78,25 @@ async function main() {
   const parsed = await parser.parseURL(FEED_URL);
   const items = parsed.items.slice(0, ITEM_LIMIT);
 
-  const articles = items.map(item => ({
-    title: item.title || "بدون عنوان",
-    summary: buildSummary(item),
-    image_url: extractImage(item),
-    source_url: item.link || "",
-    source_name: SOURCE_NAME,
-    published_date: item.isoDate || item.pubDate || new Date().toISOString()
-  })).filter(a => a.source_url);
+  const articles = [];
+  for (const item of items) {
+    const link = item.link || "";
+    if (!link) continue;
+
+    let image = extractImage(item);
+    if (!image) {
+      image = await fetchOgImage(link);
+    }
+
+    articles.push({
+      title: item.title || "بدون عنوان",
+      summary: buildSummary(item),
+      image_url: image,
+      source_url: link,
+      source_name: SOURCE_NAME,
+      published_date: item.isoDate || item.pubDate || new Date().toISOString()
+    });
+  }
 
   console.log(`تعداد اخبار دریافت‌شده: ${articles.length}`);
   articles.forEach(a => {
