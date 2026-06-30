@@ -17,6 +17,11 @@ const BASE_URL = `https://app.base44.com/api/apps/${APP_ID}/entities/NewsArticle
 const FEED_URL = "https://www.forexlive.com/feed/news";
 const SOURCE_NAME = "ForexLive";
 const ITEM_LIMIT = 10;
+const RETENTION_DAYS = 7;
+
+const HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+};
 
 function extractImage(item) {
   if (item.mediaContent && item.mediaContent['$'] && item.mediaContent['$'].url) {
@@ -34,10 +39,6 @@ function extractImage(item) {
   return "";
 }
 
-const HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-};
-
 async function fetchOgImage(url) {
   try {
     const res = await fetch(url, { headers: HEADERS });
@@ -47,7 +48,6 @@ async function fetchOgImage(url) {
       || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
     return imageMatch ? imageMatch[1].trim() : "";
   } catch (err) {
-    console.warn(`خطا در دریافت عکس از ${url}: ${err.message}`);
     return "";
   }
 }
@@ -74,21 +74,66 @@ function buildSummary(item) {
   return fullText;
 }
 
+async function getExistingArticles() {
+  const res = await fetch(`${BASE_URL}?limit=500`, {
+    headers: { "api_key": API_KEY }
+  });
+  if (!res.ok) {
+    console.warn(`هشدار در خواندن رکوردهای موجود: ${res.status}`);
+    return [];
+  }
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data.results || data.data || []);
+}
+
+async function deleteOldArticles(existing) {
+  const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  const toDelete = existing.filter(a => {
+    const t = new Date(a.published_date).getTime();
+    return !isNaN(t) && t < cutoff;
+  });
+
+  console.log(`تعداد خبرهای قدیمی‌تر از ${RETENTION_DAYS} روز برای حذف: ${toDelete.length}`);
+
+  for (const article of toDelete) {
+    if (!article.id) continue;
+    try {
+      const res = await fetch(`${BASE_URL}/${article.id}`, {
+        method: "DELETE",
+        headers: { "api_key": API_KEY }
+      });
+      if (!res.ok) {
+        console.warn(`خطا در حذف رکورد ${article.id}: ${res.status}`);
+      }
+    } catch (err) {
+      console.warn(`خطا در حذف رکورد ${article.id}: ${err.message}`);
+    }
+  }
+}
+
 async function main() {
+  const existing = await getExistingArticles();
+  const existingUrls = new Set(existing.map(a => a.source_url));
+
   const parsed = await parser.parseURL(FEED_URL);
   const items = parsed.items.slice(0, ITEM_LIMIT);
 
-  const articles = [];
+  const newArticles = [];
+
   for (const item of items) {
     const link = item.link || "";
     if (!link) continue;
+
+    if (existingUrls.has(link)) {
+      continue;
+    }
 
     let image = extractImage(item);
     if (!image) {
       image = await fetchOgImage(link);
     }
 
-    articles.push({
+    newArticles.push({
       title: item.title || "بدون عنوان",
       summary: buildSummary(item),
       image_url: image,
@@ -98,41 +143,33 @@ async function main() {
     });
   }
 
-  console.log(`تعداد اخبار دریافت‌شده: ${articles.length}`);
-  articles.forEach(a => {
+  console.log(`تعداد خبرهای جدید برای افزودن: ${newArticles.length}`);
+  newArticles.forEach(a => {
     console.log(`- ${a.title} | عکس: ${a.image_url ? "دارد" : "ندارد"} | طول متن: ${a.summary.length}`);
   });
 
-  const deleteRes = await fetch(BASE_URL, {
-    method: "DELETE",
-    headers: {
-      "Content-Type": "application/json",
-      "api_key": API_KEY
-    },
-    body: JSON.stringify({})
-  });
+  if (newArticles.length > 0) {
+    const bulkRes = await fetch(`${BASE_URL}/bulk`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api_key": API_KEY
+      },
+      body: JSON.stringify(newArticles)
+    });
 
-  if (!deleteRes.ok) {
-    console.warn(`هشدار در پاک کردن رکوردهای قبلی: ${deleteRes.status}`);
+    if (!bulkRes.ok) {
+      const errText = await bulkRes.text();
+      throw new Error(`خطا در ارسال اخبار به Base44: ${bulkRes.status} - ${errText}`);
+    }
+    console.log(`با موفقیت ${newArticles.length} خبر جدید ذخیره شد.`);
   } else {
-    console.log("رکوردهای قبلی پاک شدند.");
+    console.log("خبر جدیدی برای افزودن وجود نداشت.");
   }
 
-  const bulkRes = await fetch(`${BASE_URL}/bulk`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "api_key": API_KEY
-    },
-    body: JSON.stringify(articles)
-  });
+  await deleteOldArticles(existing);
 
-  if (!bulkRes.ok) {
-    const errText = await bulkRes.text();
-    throw new Error(`خطا در ارسال اخبار به Base44: ${bulkRes.status} - ${errText}`);
-  }
-
-  console.log(`با موفقیت ${articles.length} خبر ذخیره شد.`);
+  console.log("همگام‌سازی کامل شد.");
 }
 
 main().catch(err => {
