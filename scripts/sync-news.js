@@ -18,7 +18,11 @@ const FEED_URL = "https://www.investing.com/rss/news_1.rss";
 const SOURCE_NAME = "Investing.com";
 const ITEM_LIMIT = 10;
 
-function extractImage(item) {
+const HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+};
+
+function extractImageFromFeed(item) {
   if (item.mediaContent && item.mediaContent['$'] && item.mediaContent['$'].url) {
     return item.mediaContent['$'].url;
   }
@@ -28,42 +32,63 @@ function extractImage(item) {
   if (item.enclosure && item.enclosure.url) {
     return item.enclosure.url;
   }
-  const content = item.contentEncoded || item.content || "";
-  const match = content.match(/<img[^>]+src="([^">]+)"/);
-  if (match) return match[1];
   return "";
 }
 
-function cleanText(html) {
-  if (!html) return "";
-  let text = html
-    .replace(/<img[^>]*>/g, "")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text;
+function decodeHtmlEntities(str) {
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
 }
 
-function buildSummary(item) {
-  const fullText = cleanText(item.contentEncoded || item.content || item.description || item.contentSnippet || "");
-  if (fullText.length > 600) {
-    return fullText.slice(0, 600) + "...";
+async function fetchArticleMeta(url) {
+  try {
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) return {};
+    const html = await res.text();
+
+    const descMatch = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)
+      || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i)
+      || html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i);
+
+    const imageMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+      || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+
+    return {
+      description: descMatch ? decodeHtmlEntities(descMatch[1]).trim() : "",
+      image: imageMatch ? imageMatch[1].trim() : ""
+    };
+  } catch (err) {
+    console.warn(`خطا در خواندن صفحه خبر ${url}: ${err.message}`);
+    return {};
   }
-  return fullText;
 }
 
 async function main() {
   const parsed = await parser.parseURL(FEED_URL);
   const items = parsed.items.slice(0, ITEM_LIMIT);
 
-  const articles = items.map(item => ({
-    title: item.title || "بدون عنوان",
-    summary: buildSummary(item),
-    image_url: extractImage(item),
-    source_url: item.link || "",
-    source_name: SOURCE_NAME,
-    published_date: item.isoDate || item.pubDate || new Date().toISOString()
-  })).filter(a => a.source_url);
+  const articles = [];
+
+  for (const item of items) {
+    const link = item.link || "";
+    if (!link) continue;
+
+    const feedImage = extractImageFromFeed(item);
+    const meta = await fetchArticleMeta(link);
+
+    articles.push({
+      title: item.title || "بدون عنوان",
+      summary: meta.description || "",
+      image_url: feedImage || meta.image || "",
+      source_url: link,
+      source_name: SOURCE_NAME,
+      published_date: item.isoDate || item.pubDate || new Date().toISOString()
+    });
+  }
 
   console.log(`تعداد اخبار دریافت‌شده: ${articles.length}`);
   articles.forEach(a => {
