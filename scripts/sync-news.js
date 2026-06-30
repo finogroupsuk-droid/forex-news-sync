@@ -47,8 +47,10 @@ function decodeHtmlEntities(str) {
 async function fetchArticleMeta(url) {
   try {
     const res = await fetch(url, { headers: HEADERS });
+    console.log(`  [debug] ${url} -> status: ${res.status}`);
     if (!res.ok) return {};
     const html = await res.text();
+    console.log(`  [debug] طول HTML دریافتی: ${html.length}`);
 
     const descMatch = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)
       || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i)
