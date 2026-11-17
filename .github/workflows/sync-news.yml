@@ -22,6 +22,6 @@ jobs:
 
       - name: Run news sync script
         env:
-          BASE44_API_KEY: ${{ secrets.BASE44_API_KEY }}
-          BASE44_APP_ID: ${{ secrets.BASE44_APP_ID }}
+          BASE44_API_KEY: ${{ secrets.FOREX_CALENDAR_NEWS_SYNC }}
+          BASE44_APP_ID: "6a29c255160e47a2f1b7e4e6"
         run: node scripts/sync-news.js
