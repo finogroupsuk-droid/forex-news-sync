@@ -113,7 +113,7 @@ function trimSummary(text) {
 
 async function getExistingArticles() {
   const res = await fetch(`${BASE_URL}?limit=500`, {
-    headers: { "api_key": API_KEY }
+    headers: { "Authorization": `Bearer ${API_KEY}` }
   });
   if (!res.ok) {
     console.warn(`هشدار در خواندن رکوردهای موجود: ${res.status}`);
@@ -137,7 +137,7 @@ async function deleteOldArticles(existing) {
     try {
       const res = await fetch(`${BASE_URL}/${article.id}`, {
         method: "DELETE",
-        headers: { "api_key": API_KEY }
+        headers: { "Authorization": `Bearer ${API_KEY}` }
       });
       if (!res.ok) {
         console.warn(`خطا در حذف رکورد ${article.id}: ${res.status}`);
@@ -199,7 +199,7 @@ async function main() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "api_key": API_KEY
+        "Authorization": `Bearer ${API_KEY}`
       },
       body: JSON.stringify(newArticles)
     });
