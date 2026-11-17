@@ -1,0 +1,24 @@
+name: Sync Forex Calendar
+
+on:
+  schedule:
+    - cron: '30 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Run calendar sync script
+        env:
+          BASE44_API_KEY: ${{ secrets.FOREX_CALENDAR_NEWS_SYNC }}
+          BASE44_APP_ID: "6a29c255160e47a2f1b7e4e6"
+        run: node scripts/sync-calendar.js
